@@ -232,6 +232,9 @@ class ActionProposal(BaseModel):
     params: ActionParams = Field(default_factory=ActionParams)
     reason: str = ""
     confidence: float = 0.5
+    perception_source: str = "cloud"
+    local_confidence: Optional[float] = None
+    local_ms: Optional[int] = None
 
     @field_validator("target", mode="before")
     @classmethod

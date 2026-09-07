@@ -342,15 +342,43 @@ class Task:
         # --- REASONING ---
         await self.set_state("REASONING")
         try:
-            action = await reasoner.propose(
-                self.plan.objective if self.plan else self.command,
-                self.plan, reasoner_obs, self.history, self.task_id, self.step, self.extracted,
-                discovered=self.discovered, notes=self.notes,
-                dead_targets=self._dead_targets,
-            )
-            # Re-ground against the original observation to remove datamarks from the UI
-            from .reasoner import _ground
-            action = _ground(action, obs)
+            action = None
+            
+            # 1. Try local on-device reasoning FIRST (Task 1c)
+            local_res = await bridge.request("local_reason", {
+                "observation": obs.model_dump(),
+                "plan": self.plan.objective if self.plan else self.command
+            }, task_id=self.task_id)
+            
+            if local_res and local_res.get("ok") and local_res.get("result"):
+                res = local_res["result"]
+                prop = res.get("proposal", {})
+                if prop and prop.get("confidence", 0) >= 0.55:
+                    try:
+                        action = ActionProposal(**prop)
+                        action.perception_source = res.get("source", "local-nano")
+                        action.local_confidence = prop.get("confidence")
+                        action.local_ms = res.get("ms")
+                        # Re-ground against original obs
+                        from .reasoner import _ground
+                        action = _ground(action, obs)
+                    except Exception as e:
+                        # Fallback to hosted model if schema fails
+                        action = None
+            
+            # 2. Fallback to hosted reasoner if local failed or low confidence
+            if action is None:
+                action = await reasoner.propose(
+                    self.plan.objective if self.plan else self.command,
+                    self.plan, reasoner_obs, self.history, self.task_id, self.step, self.extracted,
+                    discovered=self.discovered, notes=self.notes,
+                    dead_targets=self._dead_targets,
+                )
+                action.perception_source = "cloud"
+                
+                from .reasoner import _ground
+                action = _ground(action, obs)
+                
         except MalformedAction as exc:
             # An unusable reply costs a step, not the task. This escaping as a
             # fatal error ended a multi-site run at the final hop because one
@@ -437,6 +465,9 @@ class Task:
             "reason": action.reason,
             "confidence": action.confidence,
             "preview": redact_preview(action),
+            "perception_source": action.perception_source,
+            "local_confidence": action.local_confidence,
+            "local_ms": action.local_ms,
         }, task_id=self.task_id, step=self.step)
 
         # --- NOTE ---
@@ -472,8 +503,17 @@ class Task:
         if action.action == "request_quoted_message":
             purpose = action.params.purpose or "Write the outgoing message based on the notes."
             quoted = await compose_message(self.command, self.notes, purpose)
-            self.quoted_message = quoted
+            if "[NEED_MORE_INFO]" in quoted:
+                fail_msg = "FAILED: The Quoter refused to compose the message because required information is MISSING from your trusted notes. You MUST use 'note' to save the information (e.g., from a web search or chatgpt) BEFORE requesting the message."
+                self.history.append({
+                    "step": self.step,
+                    "summary": f"request_quoted_message -> {fail_msg}",
+                    "verdict": "failed",
+                    "detail": fail_msg,
+                })
+                return obs
             
+            self.quoted_message = quoted
             self.notes.append(f"Prepared quoted message for purpose '{purpose}': {quoted[:200]}")
             await bus.emit("ACTION_EXECUTED", {
                 "action_id": action.action_id, "action": "request_quoted_message",

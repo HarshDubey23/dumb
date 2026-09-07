@@ -20,7 +20,7 @@ const AGENT_BUILD = 'b17-click-not-undone'
 
 const AGENT_EID = 'agentEid'
 const AGENT_NID = 'agentNid'
-const MAX_ELEMENTS = 150
+const MAX_ELEMENTS = 300
 const TEXT_CAP = 160
 const PAGE_TEXT_CAP = 9000
 
@@ -65,7 +65,7 @@ const STRICTER_PATTERNS = [
   // date.
   { type: 'DOB', regex: /\b(?:dob|d\.?o\.?b|date of birth|born(?: on)?|birth\s*date)\b[:\s-]*\d{1,2}[/\-.]\d{1,2}[/\-.](?:19|20)?\d{2}\b/gi, from: 'balanced' },
   { type: 'ADDRESS', regex: /\b\d{1,4}[,\s]+[A-Za-z][A-Za-z\s]{3,30}(?:Road|Rd|Street|St|Lane|Nagar|Colony|Sector|Block)\b/gi, from: 'balanced' },
-  { type: 'NAME', regex: /\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+\b/g, from: 'strict' },
+  { type: 'NAME', regex: /\b[A-Z][a-z]{2,}\b/g, from: 'balanced' },
 ]
 
 // Words the operator used in their own command. Redacting these would make the
@@ -508,7 +508,7 @@ function walk() {
     ownText = ownText.replace(/\s+/g, ' ').trim()
     const smallEnough = rect.width * rect.height
       <= window.innerWidth * window.innerHeight * 0.06
-    if (protectedField || (smallEnough && (hasPii(rawName) || hasPii(ownText)))) {
+    if (protectedField || (smallEnough && hasPii(ownText))) {
       // CSS pixels. The screenshot's true scale is measured when it is taken,
       // because the captured bitmap does not reliably equal viewport * dpr.
       sensitiveBoxes.push([

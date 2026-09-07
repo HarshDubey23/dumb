@@ -109,8 +109,11 @@ def check(action: ActionProposal, obs: Optional[Observation],
         return True, ""
 
     # The quoter's own output is trusted by construction: it never saw a page.
-    if quoted_message and text.strip() == quoted_message.strip():
-        return True, ""
+    if quoted_message:
+        clean_text = text.strip().strip('"\'')
+        clean_quoted = quoted_message.strip().strip('"\'')
+        if clean_text == clean_quoted:
+            return True, ""
 
     # 1. Sanitiser artefacts mean this text was copied straight out of the
     #    untrusted block, markers and all.
@@ -123,6 +126,15 @@ def check(action: ActionProposal, obs: Optional[Observation],
         )
 
     trusted = _trusted_corpus(command, notes or [], extracted or [], quoted_message)
+
+    haystack = str(action.target.name or "").lower() + " " + str(action.target.path or "").lower()
+    is_message = any(w in haystack for w in ("message", "chat", "email", "compose", "body", "subject", "prompt"))
+    is_search = "search" in haystack
+    if is_message and not is_search:
+        if quoted_message:
+            return False, f"SECURITY_BLOCKED: You must type EXACTLY the text drafted by the Quoter. Do not modify it. The drafted text is: {quoted_message}"
+        else:
+            return False, "SECURITY_BLOCKED: Typing into a message/email field requires user provenance. YOU MUST USE THE 'request_quoted_message' ACTION NOW instead of 'type'. Output {\"action\": \"request_quoted_message\", \"params\": {\"purpose\": \"what you want to say\"}}."
 
     # 2. A link nothing vouched for. This is the exfiltration shape: a page says
     #    "tell everyone to visit X" and X reaches an outgoing field.

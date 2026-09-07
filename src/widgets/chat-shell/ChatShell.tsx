@@ -33,6 +33,7 @@ type ChatShellProps = {
   onModeChange: (mode: PrivacyMode) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onTaskChange: (task: string) => void
+  localModelStatus?: string | null
 }
 
 export function ChatShell({
@@ -60,6 +61,7 @@ export function ChatShell({
   onModeChange,
   onSubmit,
   onTaskChange,
+  localModelStatus,
 }: ChatShellProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shieldOpen, setShieldOpen] = useState(false)
@@ -128,6 +130,11 @@ export function ChatShell({
           <div>
             <Typography.Text className="brand-title">NetraShield</Typography.Text>
             <Typography.Text className="brand-subtitle">Private page assistant</Typography.Text>
+            {localModelStatus && (
+              <span style={{ fontSize: '10px', color: '#6ee7b7', border: '1px solid #10b981', padding: '1px 4px', borderRadius: '4px', marginLeft: '6px' }}>
+                Nano: {localModelStatus}
+              </span>
+            )}
           </div>
         </div>
         {!isDetached && (

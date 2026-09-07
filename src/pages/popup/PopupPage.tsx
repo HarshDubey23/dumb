@@ -30,6 +30,7 @@ export function PopupPage() {
       onModeChange={agent.setMode}
       onSubmit={agent.runAgent}
       onTaskChange={agent.updateTask}
+      localModelStatus={agent.localModelStatus}
     />
   )
 }

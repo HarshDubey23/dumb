@@ -141,6 +141,7 @@
   border-radius: 8px;
   font-size: 0.82rem;
   line-height: 1.4;
+  white-space: pre-wrap;
 }
 
 .message.assistant {
@@ -522,12 +523,25 @@ html.detached .chat-popup {
    This panel is the receipt: what was hidden, how much of it, and — when you
    open it — the exact text the model received, [REDACTED:…] markers and all. */
 .shield-panel {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   margin: 0 12px 8px;
   padding: 8px 10px;
   border: 1px solid rgba(16, 185, 129, 0.35);
   border-radius: 10px;
   background: rgba(6, 20, 16, 0.85);
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.shield-panel::-webkit-scrollbar {
+  width: 6px;
+}
+.shield-panel::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+.shield-panel::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.3);
+  border-radius: 10px;
 }
 
 .shield-head {

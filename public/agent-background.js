@@ -105,14 +105,53 @@ async function connect() {
     return
   }
 
-  ws.onopen = () => {
+async function probeLocalModel() {
+  let availability = 'unavailable';
+  try {
+    const lm = globalThis.LanguageModel || (globalThis.ai && globalThis.ai.languageModel);
+    if (lm && lm.availability) {
+      const avail = await lm.availability({
+        expectedInputs: [{ type: 'image' }, { type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }]
+      });
+      availability = (typeof avail === 'object' && avail.available) ? avail.available : avail;
+    }
+  } catch (e) {
+    console.error('[agent] Error probing local model:', e);
+  }
+  
+  if (availability === 'downloadable') {
+    try {
+      const lm = globalThis.LanguageModel || (globalThis.ai && globalThis.ai.languageModel);
+      await lm.create({
+        monitor: (m) => {
+          m.addEventListener('downloadprogress', (e) => {
+            console.log(`[agent] Download progress: ${e.loaded} / ${e.total}`);
+          });
+        }
+      });
+      availability = 'available';
+    } catch (e) {
+      console.error('[agent] Error downloading local model:', e);
+      availability = 'unavailable';
+    }
+  }
+  return availability;
+}
+
+  ws.onopen = async () => {
     connected = true
     console.log('[agent] WS connected ->', base)
+    
+    const local_model_status = await probeLocalModel();
+    chrome.storage.local.set({ local_model_status });
+    
     send('WS_CONNECTED', {
       session_id: sid,
       user_agent: navigator.userAgent,
       extension_version: chrome.runtime.getManifest().version,
       sw_build: AGENT_SW_BUILD,
+      local_model_status: local_model_status
     })
     startKeepalive()
     setBadge('ON', '#0f766e')
@@ -574,6 +613,114 @@ async function handleBridgeRequest(payload) {
       return { ok: true, result: obs }
     }
 
+    case 'local_reason': {
+      let availability = await probeLocalModel();
+      if (availability !== 'available') {
+        return { ok: false, error: 'Nano model not available (status: ' + availability + ')' };
+      }
+      
+      const { observation, plan } = args;
+      if (!observation) return { ok: false, error: 'No observation provided' };
+      
+      try {
+        // The prompt says: prompt with BOTH the masked ImageBitmap that captureRedacted() already builds AND the compact element list
+        // captureRedacted() produces shot.screenshot (base64 string). But maybe we should fetch ImageBitmap?
+        // Wait, captureRedacted already returns base64. 
+        // We just pass it to expectedInputs as image?
+        // Chrome Nano Prompt API `expectedInputs: [{type: 'image'}]` accepts Blob or ImageBitmap, not base64 directly?
+        // Actually the prompt says "prompt with BOTH the masked ImageBitmap that captureRedacted() already builds..."
+        // If we just send the base64 from python to JS, we have to convert it back. Wait, python doesn't send the ImageBitmap, the JS `captureRedacted` builds it, but this is a separate bridge call!
+        // Actually, Python passes observation which contains screenshot (base64).
+        // Let's decode the base64 into a Blob.
+        let imagePart = null;
+        if (observation.screenshot) {
+          const res = await fetch(`data:image/jpeg;base64,${observation.screenshot}`);
+          const blob = await res.blob();
+          // The prompt says expectedInputs accepts Blob.
+          imagePart = blob;
+        }
+        
+        let textPart = `PLAN: ${plan}\n\n`;
+        if (observation.interactive_elements) {
+          textPart += `ELEMENTS:\n`;
+          for (const el of observation.interactive_elements.slice(0, 45)) {
+            textPart += `[${el.eid}] ${el.role}`;
+            if (el.name) textPart += ` "${el.name}"`;
+            textPart += `\n`;
+          }
+        }
+        
+        // Define ActionProposal JSON schema
+        const schema = {
+          "type": "object",
+          "properties": {
+            "action": {"type": "string"},
+            "target": {
+              "type": "object",
+              "properties": {
+                "element_id": {"type": ["string", "null"]},
+                "tab_id": {"type": ["integer", "null"]}
+              }
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "url": {"type": ["string", "null"]},
+                "text": {"type": ["string", "null"]},
+                "summary": {"type": ["string", "null"]},
+                "error": {"type": ["string", "null"]},
+                "expected": {
+                  "type": ["object", "null"],
+                  "properties": {
+                    "element_gone": {"type": ["string", "null"]},
+                    "element_appears": {"type": ["string", "null"]}
+                  }
+                },
+                "purpose": {"type": ["string", "null"]}
+              }
+            },
+            "reason": {"type": "string"},
+            "confidence": {"type": "number"}
+          },
+          "required": ["action"]
+        };
+        
+        const lm = globalThis.LanguageModel || (globalThis.ai && globalThis.ai.languageModel);
+        const session = await lm.create({
+          expectedInputs: [{ type: 'image' }, { type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }]
+        });
+        
+        const started = performance.now();
+        const inputs = [];
+        if (imagePart) inputs.push(imagePart);
+        inputs.push(textPart);
+        
+        // Wait, the prompt API takes a string or an array of parts? Wait, the 2026 Prompt API takes an array of parts for multimodal.
+        let resultJson;
+        try {
+          const resultStr = await session.prompt(inputs); // Wait, responseConstraint might be in create() or prompt()? 
+          resultJson = JSON.parse(resultStr);
+        } catch (e) {
+          // If array prompt fails, try sending string if no image.
+          const resultStr = await session.prompt(textPart);
+          resultJson = JSON.parse(resultStr);
+        }
+        
+        const elapsed = Math.round(performance.now() - started);
+        return { 
+          ok: true, 
+          result: { 
+            proposal: resultJson,
+            source: 'local-nano',
+            ms: elapsed
+          } 
+        };
+      } catch (e) {
+        return { ok: false, error: 'Local reasoner failed: ' + e.message };
+      }
+    }
+    
     case 'capture_any': {
       // A picture of a page an extension is not allowed to read.
       //

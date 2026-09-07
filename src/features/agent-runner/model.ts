@@ -95,7 +95,7 @@ function describe(e: Envelope): string | null {
       return `${p.replanned ? 'Rewrote the plan now that I know the task' : 'Plan'}: ${p.objective}\n${steps}`
     }
     case 'ACTION_PROPOSED':
-      return `${p.preview || p.action} — ${p.reason || ''}`.trim()
+      return `Action: ${p.preview || p.action}\nReasoning: ${p.reason || ''}`.trim()
     case 'POLICY_DENIED':
       return `Refused: ${p.decision?.reason || 'blocked by policy'}`
     case 'CONFIRMATION_REQUESTED':
@@ -174,6 +174,8 @@ export function useAgentRunner() {
   // Which page the agent would act on. Empty means there is none.
   const [targetPage, setTargetPage] = useState<string | null>(null)
 
+  const [localModelStatus, setLocalModelStatus] = useState<string | null>(null)
+  
   /**
    * Ask the worker what page it can see, and keep asking.
    *
@@ -189,6 +191,10 @@ export function useAgentRunner() {
         chrome.runtime?.sendMessage({ type: 'AGENT_STATUS' }, (reply: any) => {
           if (!alive || chrome.runtime?.lastError || !reply) return
           setTargetPage(reply.target_url || '')
+        })
+        chrome.storage?.local?.get('local_model_status', (data) => {
+          if (!alive || chrome.runtime?.lastError) return
+          setLocalModelStatus(data.local_model_status || null)
         })
       } catch {
         /* not running as an extension */
@@ -575,5 +581,6 @@ export function useAgentRunner() {
     detach,
     isDetached,
     serverUrl: SERVER_HTTP,
+    localModelStatus,
   }
 }

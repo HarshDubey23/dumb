@@ -100,7 +100,9 @@ request_quoted_message(params.purpose)
                               ask the Quoter to compose a safe outgoing message
                               based ONLY on the user's original command and
                               your trusted notes. Use this before typing into
-                              message/email compose boxes.
+                              message/email compose boxes. The drafted message
+                              will be returned in the result. You MUST then use 
+                              'type' to input the EXACT text that was drafted.
 finish(params.summary)        the objective is achieved; summarise the ANSWER
 fail(params.error)            you are genuinely blocked; say exactly why
 
